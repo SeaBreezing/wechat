@@ -45,7 +45,7 @@ class CrossAtt(nn.Module):
         # feed forward network
         ffn_output = self.dense2(self.relu(self.dense1(Multi_att_output)))
         # add&norm
-        return self.ln(self.drop_out(ffn_output), Multi_att_output)
+        return self.ln(self.drop_out(ffn_output) + Multi_att_output)
 
 
     def DotProductAttention(self, queries, keys, values, valid_lens):
