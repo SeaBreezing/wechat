@@ -38,7 +38,8 @@ class CrossAtt(nn.Module):
         # 在轴0，将第⼀项（标量或者⽮量）复制num_heads次，
         # 然后如此复制第⼆项，然后诸如此类
             valid_lens_1 = torch.repeat_interleave(valid_lens_1, repeats=self.num_heads, dim=0) # ([48])，每一个元素重复3次
-    
+        if valid_lens_2 is not None:
+            valid_lens_2 = torch.repeat_interleave(valid_lens_2, repeats=self.num_heads, dim=0) # ([48])，每一个元素重复3次
         output = self.DotProductAttention(queries, keys, values, valid_lens_1, valid_lens_2) # ([48, 330, 256])
         output_concat = transpose_output(output, self.num_heads) # ([16, 330, 768])
         Multi_att_output = self.W_o(output_concat)
@@ -53,33 +54,37 @@ class CrossAtt(nn.Module):
     def DotProductAttention(self, queries, keys, values, valid_lens_1, valid_lens_2):
         d = queries.shape[-1] # 768
         scores = torch.bmm(queries, keys.transpose(1, 2)) / math.sqrt(d)
-        # scores_debug = scores
         self.attention_weights = self.masked_softmax(scores, valid_lens_1, valid_lens_2)
-        # attention_weights_debug = nn.functional.softmax(scores_debug, dim=-1)
-        # print(attention_weights_debug.equal(self.attention_weights))
         return torch.bmm(self.drop_out(self.attention_weights), values)
 
     def masked_softmax(self, X, valid_lens_1, valid_lens_2): #input : X([48, 330, 32])
         """通过在最后⼀个轴上掩蔽元素来执⾏softmax操作"""
         # X:3D张量， valid_lens:1D或2D张量
-        if valid_lens_1 is None:
+        if valid_lens_1 is None and valid_lens_2 is None:
             return nn.functional.softmax(X, dim=-1)
         else:
-            shape = X.shape # 48 330 32
-            valid_lens_1 = torch.repeat_interleave(valid_lens_1, shape[1]) # ([48]) -> ([15840]) 现在每一个元素重复990次
+            shape_1 = X.shape # 48 330 32
+            valid_lens_1 = torch.repeat_interleave(valid_lens_1, shape_1[1]) # ([48]) -> ([15840]) 现在每一个元素重复990次
                 # 最后⼀轴上被掩蔽的元素使⽤⼀个⾮常⼤的负值替换，从⽽其softmax输出为0
                 # valid_lens_1中的元素大小是视频的有效长度，但重复的次数由文本决定
-            X = self.sequence_mask(X.reshape(-1, shape[-1]), valid_lens_1, value=-1e6) # ([15840, 32])
-            X = X.reshape(shape) # ([48 330 32])
+            # frame_mask
+            X = self.sequence_mask(X.reshape(-1, shape_1[-1]), valid_lens_1, value=-1e6) # ([15840, 32])
+            X = X.reshape(shape_1) # ([48 330 32])
+            # title_mask
+            X = X.permute(0, 2, 1) # 48 32 330
+            shape_2 = X.shape #
+            valid_lens_2 = torch.repeat_interleave(valid_lens_2, shape_2[1]) # ([1536])
+            X = self.sequence_mask(X.reshape(-1, shape_2[-1]), valid_lens_2, value=-1e6) # 1536 330
+            X = X.reshape(shape_2) # 48 32 330
+            X = X.permute(0, 2, 1) # 48 330 32
         return nn.functional.softmax(X, dim=-1)
     
     def sequence_mask(self, X, valid_len, value=0): # input : X([15840, 32])
         """在序列中屏蔽不相关的项, X的维度不改变"""
-        X_debug = X
         maxlen = X.size(1) # dim=1维度的大小,即32
         mask = torch.arange((maxlen), dtype=torch.float32, device=X.device)[None, :] < valid_len[:, None] # ([15840, 32])
         X[~mask] = value
-        print(X.equal(X_debug))
+
         return X
 
     def get_valid_len(self, X):
