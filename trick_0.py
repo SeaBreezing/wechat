@@ -10,13 +10,13 @@ class EMA():
         self.shadow = {} # 初始化一个字典
         self.backup = {}
         
-    # 完成step1
+    # 完成step1，初始化影子权重为初始权重数据
     def register(self):
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 self.shadow[name] = param.data.clone()
     
-    #step2的后半步，注意没用更新参数的操作
+    #step2的后半步（同步更新shadow weight），注意没用更新参数的操作
     def update(self):
         for name, param in self.model.named_parameters():
             if param.requires_grad:
@@ -24,7 +24,7 @@ class EMA():
                 new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name] # decay就是beta
                 self.shadow[name] = new_average.clone() # 注意是self，共享的
 
-    # step3的后半句，注意这个函数用于validate和test,注意EMA的参数并不会用于训练时的参数更新
+    # step3的后半句(将EMA后的参数赋值给model)，注意这个函数用于validate和test,注意EMA的参数并不会用于训练时的参数更新
     def apply_shadow(self):
         for name, param in self.model.named_parameters():
             if param.requires_grad:
@@ -32,7 +32,7 @@ class EMA():
                 self.backup[name] = param.data
                 param.data = self.shadow[name]
 
-    # step3
+    # step5(测试结束 重新载入model本身参数)
     def restore(self):
         for name, param in self.model.named_parameters():
             if param.requires_grad:
@@ -57,7 +57,7 @@ class FGM:
                 if norm and not torch.isnan(norm):
                     r_at = self.eps * param.grad / norm
                     param.data.add_(r_at)
-    # 完成step
+    # 完成step4,将被修改的embedding恢复到原始状态（没加上r_adv 的时候）;
     def restore(self, emb_name='word_embeddings'):
         for name, para in self.model.named_parameters():
             if para.requires_grad and emb_name in name:
